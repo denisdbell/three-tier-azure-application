@@ -6,15 +6,15 @@
     "adminPassword": { "type": "securestring" },
     "vnetName": { "type": "string", "defaultValue": "PetClinic-VNet" }
   },
-    "variables": {
-    "vmSize": "Standard_B1s", 
-    "ubuntuImage": {
-      "publisher": "Canonical",
-      "offer": "0001-com-ubuntu-server-jammy",
-      "sku": "22_04-lts-gen2",
-      "version": "latest"
-    }
-  },
+   "variables": {
+  "vmSize": "Standard_B1ms", 
+  "ubuntuImage": {
+    "publisher": "Canonical",
+    "offer": "0001-com-ubuntu-server-jammy",
+    "sku": "22_04-lts-gen2",
+    "version": "latest"
+  }
+ },
   "resources": [
     {
       "type": "Microsoft.Network/networkInterfaces",
