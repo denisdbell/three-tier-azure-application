@@ -10,10 +10,29 @@
   },
   "variables": {
     "appServicePlanName": "PetClinic-ASP",
-    "dbServerName": "[concat('pet-db-', uniqueString(resourceGroup().id))]"
+    "dbServerName": "[concat('pet-db-', uniqueString(resourceGroup().id))]",
+    "dnsZoneName": "[concat(variables('dbServerName'), '.private.postgres.database.azure.com')]"
   },
   "resources": [
-    /* SHARED APP SERVICE PLAN (Runs both Web and App to save cost/quota) */
+    /* DNS INFRASTRUCTURE FOR TIER 3 */
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('dnsZoneName')]",
+      "location": "global"
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2020-06-01",
+      "name": "[concat(variables('dnsZoneName'), '/link')]",
+      "location": "global",
+      "dependsOn": [ "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZoneName'))]" ],
+      "properties": {
+        "registrationEnabled": false,
+        "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]" }
+      }
+    },
+    /* SHARED APP SERVICE PLAN */
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2022-09-01",
@@ -23,7 +42,7 @@
       "kind": "linux",
       "properties": { "reserved": true }
     },
-    /* TIER 1: NGINX WEB APP (Docker Container) */
+    /* TIER 1: NGINX WEB APP */
     {
       "type": "Microsoft.Web/sites",
       "apiVersion": "2022-09-01",
@@ -33,10 +52,7 @@
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
         "siteConfig": {
-          "linuxFxVersion": "DOCKER|nginx:latest",
-          "appSettings": [
-            { "name": "WEBSITES_PORT", "value": "80" }
-          ]
+          "linuxFxVersion": "DOCKER|nginx:latest"
         },
         "virtualNetworkSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Web-Subnet')]"
       }
@@ -69,19 +85,23 @@
         "virtualNetworkSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'App-Subnet')]"
       }
     },
-    /* TIER 3: MANAGED POSTGRES */
+    /* TIER 3: MANAGED POSTGRES (FIXED WITH DNS) */
     {
       "type": "Microsoft.DBforPostgreSQL/flexibleServers",
       "apiVersion": "2022-12-01",
       "name": "[variables('dbServerName')]",
       "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('dnsZoneName'), 'link')]"
+      ],
       "sku": { "name": "Standard_B1ms", "tier": "Burstable" },
       "properties": {
         "administratorLogin": "[parameters('dbAdminLogin')]",
         "administratorLoginPassword": "[parameters('dbAdminPassword')]",
         "version": "14",
         "network": {
-          "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Data-Subnet')]"
+          "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Data-Subnet')]",
+          "privateDnsZoneArmResourceId": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZoneName'))]"
         }
       }
     }
