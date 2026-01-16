@@ -99,6 +99,9 @@
         "administratorLogin": "[parameters('dbAdminLogin')]",
         "administratorLoginPassword": "[parameters('dbAdminPassword')]",
         "version": "14",
+        "storage": { 
+          "storageSizeGB": 64 
+        },
         "network": {
           "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Data-Subnet')]",
           "privateDnsZoneArmResourceId": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZoneName'))]"
