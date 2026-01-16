@@ -6,8 +6,8 @@
     "adminPassword": { "type": "securestring" },
     "vnetName": { "type": "string", "defaultValue": "PetClinic-VNet" }
   },
-  "variables": {
-    "vmSize": "Standard_B2s",
+    "variables": {
+    "vmSize": "Standard_B1s", 
     "ubuntuImage": {
       "publisher": "Canonical",
       "offer": "0001-com-ubuntu-server-jammy",
