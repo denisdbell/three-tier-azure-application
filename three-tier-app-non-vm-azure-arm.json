@@ -2,16 +2,18 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "webAppName": { "type": "string", "defaultValue": "[concat('petclinic-', uniqueString(resourceGroup().id))]" },
+    "webAppName": { "type": "string", "defaultValue": "[concat('nginx-front-', uniqueString(resourceGroup().id))]" },
+    "appAppName": { "type": "string", "defaultValue": "[concat('pet-app-', uniqueString(resourceGroup().id))]" },
     "dbAdminLogin": { "type": "string", "defaultValue": "petadmin" },
     "dbAdminPassword": { "type": "securestring" },
     "vnetName": { "type": "string", "defaultValue": "PetClinic-VNet" }
   },
   "variables": {
     "appServicePlanName": "PetClinic-ASP",
-    "dbServerName": "[concat('petclinic-db-', uniqueString(resourceGroup().id))]"
+    "dbServerName": "[concat('pet-db-', uniqueString(resourceGroup().id))]"
   },
   "resources": [
+    /* SHARED APP SERVICE PLAN (Runs both Web and App to save cost/quota) */
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2022-09-01",
@@ -21,6 +23,7 @@
       "kind": "linux",
       "properties": { "reserved": true }
     },
+    /* TIER 1: NGINX WEB APP (Docker Container) */
     {
       "type": "Microsoft.Web/sites",
       "apiVersion": "2022-09-01",
@@ -30,17 +33,43 @@
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
         "siteConfig": {
+          "linuxFxVersion": "DOCKER|nginx:latest",
+          "appSettings": [
+            { "name": "WEBSITES_PORT", "value": "80" }
+          ]
+        },
+        "virtualNetworkSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Web-Subnet')]"
+      }
+    },
+    /* TIER 2: JAVA PETCLINIC APP SERVICE */
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('appAppName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [ "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]" ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "siteConfig": {
           "linuxFxVersion": "JAVA|17-java17",
           "appSettings": [
-            { "name": "SPRING_PROFILES_ACTIVE", "value": "postgres" },
             { "name": "SPRING_DATASOURCE_URL", "value": "[concat('jdbc:postgresql://', variables('dbServerName'), '.postgres.database.azure.com:5432/petclinic')]" },
             { "name": "SPRING_DATASOURCE_USERNAME", "value": "[parameters('dbAdminLogin')]" },
             { "name": "SPRING_DATASOURCE_PASSWORD", "value": "[parameters('dbAdminPassword')]" }
+          ],
+          "ipSecurityRestrictions": [
+            {
+              "name": "Allow-Tier1-Subnet",
+              "action": "Allow",
+              "priority": 100,
+              "vnetSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Web-Subnet')]"
+            }
           ]
         },
         "virtualNetworkSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'App-Subnet')]"
       }
     },
+    /* TIER 3: MANAGED POSTGRES */
     {
       "type": "Microsoft.DBforPostgreSQL/flexibleServers",
       "apiVersion": "2022-12-01",
@@ -51,17 +80,9 @@
         "administratorLogin": "[parameters('dbAdminLogin')]",
         "administratorLoginPassword": "[parameters('dbAdminPassword')]",
         "version": "14",
-        "storage": { "storageSizeGB": 32 }
-      }
-    },
-    {
-      "type": "Microsoft.DBforPostgreSQL/flexibleServers/firewallRules",
-      "apiVersion": "2022-12-01",
-      "name": "[concat(variables('dbServerName'), '/AllowAzureAccess')]",
-      "dependsOn": [ "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('dbServerName'))]" ],
-      "properties": {
-        "startIpAddress": "0.0.0.0",
-        "endIpAddress": "0.0.0.0"
+        "network": {
+          "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'Data-Subnet')]"
+        }
       }
     }
   ]
