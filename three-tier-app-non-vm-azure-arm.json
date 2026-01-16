@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "webAppName": { "type": "string", "defaultValue": "[concat('petclinic-', uniqueString(resourceGroup().id))]" },
+    "dbAdminLogin": { "type": "string", "defaultValue": "petadmin" },
+    "dbAdminPassword": { "type": "securestring" },
+    "vnetName": { "type": "string", "defaultValue": "PetClinic-VNet" }
+  },
+  "variables": {
+    "appServicePlanName": "PetClinic-ASP",
+    "dbServerName": "[concat('petclinic-db-', uniqueString(resourceGroup().id))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "B1", "tier": "Basic" },
+      "kind": "linux",
+      "properties": { "reserved": true }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [ "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]" ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "siteConfig": {
+          "linuxFxVersion": "JAVA|17-java17",
+          "appSettings": [
+            { "name": "SPRING_PROFILES_ACTIVE", "value": "postgres" },
+            { "name": "SPRING_DATASOURCE_URL", "value": "[concat('jdbc:postgresql://', variables('dbServerName'), '.postgres.database.azure.com:5432/petclinic')]" },
+            { "name": "SPRING_DATASOURCE_USERNAME", "value": "[parameters('dbAdminLogin')]" },
+            { "name": "SPRING_DATASOURCE_PASSWORD", "value": "[parameters('dbAdminPassword')]" }
+          ]
+        },
+        "virtualNetworkSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'App-Subnet')]"
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2022-12-01",
+      "name": "[variables('dbServerName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "Standard_B1ms", "tier": "Burstable" },
+      "properties": {
+        "administratorLogin": "[parameters('dbAdminLogin')]",
+        "administratorLoginPassword": "[parameters('dbAdminPassword')]",
+        "version": "14",
+        "storage": { "storageSizeGB": 32 }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/firewallRules",
+      "apiVersion": "2022-12-01",
+      "name": "[concat(variables('dbServerName'), '/AllowAzureAccess')]",
+      "dependsOn": [ "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('dbServerName'))]" ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      }
+    }
+  ]
+}
