@@ -76,7 +76,7 @@
           {
             "name": "petclinic",
             "properties": {
-              "image": "denisdbell/spring-petclinic:4.0.0-SNAPSHOT",
+              "image": "springcommunity/spring-petclinic-rest:3.4.3",
               "resources": {
                 "requests": {
                   "cpu": 1,
