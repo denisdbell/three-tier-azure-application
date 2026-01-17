@@ -76,17 +76,35 @@
           {
             "name": "petclinic",
             "properties": {
-              "image": "springcommunity/spring-petclinic-rest:3.4.3",
+              "image": "springcommunity/spring-petclinic-rest:3.2.1",
               "resources": {
                 "requests": {
-                  "cpu": 1,
-                  "memoryInGB": 1.5
+                  "cpu": 2,
+                  "memoryInGB": 4
                 }
               },
               "ports": [
                 {
                   "port": 9966,
                   "protocol": "TCP"
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "SPRING_PROFILES_ACTIVE",
+                  "value": "postgres,spring-data-jpa"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_URL",
+                  "value": "[concat('jdbc:postgresql://', variables('dbServerName'), '.postgres.database.azure.com:5432/postgres?sslmode=require')]"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_USERNAME",
+                  "value": "[parameters('dbAdminLogin')]"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_PASSWORD",
+                  "secureValue": "[parameters('dbAdminPassword')]"
                 }
               ]
             }
@@ -143,7 +161,7 @@
     },
     "appUrl": {
       "type": "string",
-      "value": "[concat('http://', variables('appContainerName'), '.', parameters('location'), '.azurecontainer.io:8080')]"
+      "value": "[concat('http://', variables('appContainerName'), '.', parameters('location'), '.azurecontainer.io:9966')]"
     },
     "dbServerFqdn": {
       "type": "string",
