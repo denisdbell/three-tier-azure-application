@@ -1,1 +1,171 @@
-
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "dbAdminLogin": {
+      "type": "string",
+      "defaultValue": "petadmin"
+    },
+    "dbAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Min 8 chars: uppercase, lowercase, number, special char"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    }
+  },
+  "variables": {
+    "suffix": "[uniqueString(resourceGroup().id)]",
+    "nginxContainerName": "[concat('nginx-front-', variables('suffix'))]",
+    "appContainerName": "[concat('pet-app-', variables('suffix'))]",
+    "dbServerName": "[concat('pet-db-', variables('suffix'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('nginxContainerName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "containers": [
+          {
+            "name": "nginx",
+            "properties": {
+              "image": "nginx:latest",
+              "resources": {
+                "requests": {
+                  "cpu": 0.5,
+                  "memoryInGB": 0.5
+                }
+              },
+              "ports": [
+                {
+                  "port": 80,
+                  "protocol": "TCP"
+                }
+              ]
+            }
+          }
+        ],
+        "osType": "Linux",
+        "ipAddress": {
+          "type": "Public",
+          "ports": [
+            {
+              "port": 80,
+              "protocol": "TCP"
+            }
+          ],
+          "dnsNameLabel": "[variables('nginxContainerName')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('appContainerName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('dbServerName'))]"
+      ],
+      "properties": {
+        "containers": [
+          {
+            "name": "petclinic",
+            "properties": {
+              "image": "springcommunity/spring-petclinic-rest:3.2.1",
+              "resources": {
+                "requests": {
+                  "cpu": 2,
+                  "memoryInGB": 4
+                }
+              },
+              "ports": [
+                {
+                  "port": 9966,
+                  "protocol": "TCP"
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "SPRING_PROFILES_ACTIVE",
+                  "value": "postgres,spring-data-jpa"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_URL",
+                  "value": "[concat('jdbc:postgresql://', variables('dbServerName'), '.postgres.database.azure.com:5432/postgres?sslmode=require')]"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_USERNAME",
+                  "value": "[parameters('dbAdminLogin')]"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_PASSWORD",
+                  "secureValue": "[parameters('dbAdminPassword')]"
+                }
+              ]
+            }
+          }
+        ],
+        "osType": "Linux",
+        "ipAddress": {
+          "type": "Public",
+          "ports": [
+            {
+              "port": 9966,
+              "protocol": "TCP"
+            }
+          ],
+          "dnsNameLabel": "[variables('appContainerName')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2022-12-01",
+      "name": "[variables('dbServerName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_B1ms",
+        "tier": "Burstable"
+      },
+      "properties": {
+        "administratorLogin": "[parameters('dbAdminLogin')]",
+        "administratorLoginPassword": "[parameters('dbAdminPassword')]",
+        "version": "14",
+        "storage": {
+          "storageSizeGB": 32
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/firewallRules",
+      "apiVersion": "2022-12-01",
+      "name": "[concat(variables('dbServerName'), '/AllowAllAzure')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('dbServerName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "255.255.255.255"
+      }
+    }
+  ],
+  "outputs": {
+    "nginxUrl": {
+      "type": "string",
+      "value": "[concat('http://', variables('nginxContainerName'), '.', parameters('location'), '.azurecontainer.io')]"
+    },
+    "appUrl": {
+      "type": "string",
+      "value": "[concat('http://', variables('appContainerName'), '.', parameters('location'), '.azurecontainer.io:9966/petclinic/swagger-ui/index.html')]"
+    },
+    "dbServerFqdn": {
+      "type": "string",
+      "value": "[concat(variables('dbServerName'), '.postgres.database.azure.com')]"
+    }
+  }
+}
