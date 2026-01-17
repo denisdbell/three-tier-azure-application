@@ -85,7 +85,7 @@
               },
               "ports": [
                 {
-                  "port": 8080,
+                  "port": 9966,
                   "protocol": "TCP"
                 }
               ]
@@ -97,7 +97,7 @@
           "type": "Public",
           "ports": [
             {
-              "port": 8080,
+              "port": 9966,
               "protocol": "TCP"
             }
           ],
