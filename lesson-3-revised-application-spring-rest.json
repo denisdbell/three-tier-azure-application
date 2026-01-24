@@ -1,0 +1,229 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vnetName": { "type": "string", "defaultValue": "petclinic-vnet" },
+    "adminPassword": { "type": "securestring" }
+  },
+  "variables": {
+    "suffix": "[uniqueString(resourceGroup().id)]",
+    "dnsZoneName": "[format('{0}.postgres.database.azure.com', variables('suffix'))]",
+    "dbServerName": "[format('db-{0}', variables('suffix'))]",
+    "vmssName": "[format('vmss-{0}', variables('suffix'))]",
+    "apimName": "[format('apim-{0}', variables('suffix'))]",
+    "lbName": "[format('lb-{0}', variables('suffix'))]",
+    "natGwName": "[format('nat-{0}', variables('suffix'))]",
+    "natIpName": "[format('nat-ip-{0}', variables('suffix'))]",
+    "ilbStaticIp": "10.0.1.100"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('natIpName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "Standard" },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/natGateways",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('natGwName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "Standard" },
+      "dependsOn": [ "[variables('natIpName')]" ],
+      "properties": {
+        "publicIpAddresses": [ { "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('natIpName'))]" } ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/AppSubnet', parameters('vnetName'))]",
+      "dependsOn": [ "[variables('natGwName')]" ],
+      "properties": {
+        "addressPrefix": "10.0.1.0/24",
+        "natGateway": { "id": "[resourceId('Microsoft.Network/natGateways', variables('natGwName'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('dnsZoneName')]",
+      "location": "global",
+      "resources": [
+        {
+          "type": "virtualNetworkLinks",
+          "apiVersion": "2020-06-01",
+          "name": "vnet-link",
+          "location": "global",
+          "dependsOn": [ "[variables('dnsZoneName')]" ],
+          "properties": {
+            "registrationEnabled": false,
+            "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]" }
+          }
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2022-12-01",
+      "name": "[variables('dbServerName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('dnsZoneName'), 'vnet-link')]" ],
+      "sku": { "name": "Standard_B1ms", "tier": "Burstable" },
+      "properties": {
+        "administratorLogin": "petadmin",
+        "administratorLoginPassword": "[parameters('adminPassword')]",
+        "version": "14",
+        "storage": { "storageSizeGB": 32 },
+        "network": {
+          "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'DbSubnet')]",
+          "privateDnsZoneArmResourceId": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZoneName'))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2022-12-01",
+      "name": "[format('{0}/petclinic', variables('dbServerName'))]",
+      "dependsOn": [ "[variables('dbServerName')]" ],
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      }
+    },
+    {
+      "type": "Microsoft.Network/loadBalancers",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('lbName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "Standard" },
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "name": "fe",
+            "properties": {
+              "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'AppSubnet')]" },
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('ilbStaticIp')]"
+            }
+          }
+        ],
+        "backendAddressPools": [ { "name": "pool1" } ],
+        "probes": [ 
+          { 
+            "name": "httpProbe", 
+            "properties": { "protocol": "Tcp", "port": 9966, "intervalInSeconds": 5, "numberOfProbes": 2 } 
+          } 
+        ],
+        "loadBalancingRules": [
+          {
+            "name": "HTTP",
+            "properties": {
+              "frontendIPConfiguration": { "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('lbName'), 'fe')]" },
+              "backendAddressPool": { "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('lbName'), 'pool1')]" },
+              "probe": { "id": "[resourceId('Microsoft.Network/loadBalancers/probes', variables('lbName'), 'httpProbe')]" },
+              "protocol": "Tcp",
+              "frontendPort": 80,
+              "backendPort": 9966,
+              "enableFloatingIP": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachineScaleSets",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('vmssName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [ 
+        "[variables('dbServerName')]", 
+        "[variables('lbName')]",
+        "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'AppSubnet')]"
+      ],
+      "sku": { "name": "Standard_D2s_v3", "capacity": 1 },
+      "properties": {
+        "upgradePolicy": { "mode": "Automatic" },
+        "virtualMachineProfile": {
+          "storageProfile": {
+            "imageReference": { "publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts", "version": "latest" },
+            "osDisk": { "createOption": "FromImage", "managedDisk": { "storageAccountType": "Premium_LRS" } }
+          },
+          "osProfile": {
+            "computerNamePrefix": "pet",
+            "adminUsername": "azureuser",
+            "adminPassword": "[parameters('adminPassword')]"
+          },
+          "extensionProfile": {
+            "extensions": [
+              {
+                "name": "installPetClinicRest",
+                "properties": {
+                  "publisher": "Microsoft.Azure.Extensions",
+                  "type": "CustomScript",
+                  "typeHandlerVersion": "2.1",
+                  "settings": { 
+                    "commandToExecute": "[format('apt-get update && apt-get install -y docker.io && docker run -d --restart always -p 9966:9966 -e SPRING_PROFILES_ACTIVE=postgres,spring-data-jpa -e SPRING_DATASOURCE_URL=jdbc:postgresql://{0}.postgres.database.azure.com:5432/petclinic -e SPRING_DATASOURCE_USERNAME=petadmin -e SPRING_DATASOURCE_PASSWORD={1} springcommunity/spring-petclinic-rest', variables('dbServerName'), parameters('adminPassword'))]" 
+                  }
+                }
+              }
+            ]
+          },
+          "networkProfile": {
+            "networkInterfaceConfigurations": [
+              {
+                "name": "nic",
+                "properties": {
+                  "primary": true,
+                  "ipConfigurations": [
+                    {
+                      "name": "ipconfig",
+                      "properties": {
+                        "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'AppSubnet')]" },
+                        "loadBalancerBackendAddressPools": [ { "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('lbName'), 'pool1')]" } ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ApiManagement/service",
+      "apiVersion": "2022-08-01",
+      "name": "[variables('apimName')]",
+      "location": "[resourceGroup().location]",
+      "sku": { "name": "Developer", "capacity": 1 },
+      "properties": { 
+        "publisherEmail": "admin@contoso.com", 
+        "publisherName": "PetClinic",
+        "virtualNetworkType": "External",
+        "virtualNetworkConfiguration": {
+          "subnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'ApimSubnet')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ApiManagement/service/apis",
+      "apiVersion": "2022-08-01",
+      "name": "[format('{0}/petclinic', variables('apimName'))]",
+      "dependsOn": [ "[variables('apimName')]", "[variables('lbName')]" ],
+      "properties": {
+        "displayName": "Spring PetClinic REST",
+        "path": "",
+        "protocols": [ "https" ],
+        "serviceUrl": "[format('http://{0}/petclinic/api', variables('ilbStaticIp'))]",
+        "description": "Imported automatically from the source repository.",
+        "format": "openapi-link", 
+        "value": "https://raw.githubusercontent.com/spring-petclinic/spring-petclinic-rest/master/src/main/resources/openapi.yml"
+      }
+    }
+  ]
+}
